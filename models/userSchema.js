@@ -20,6 +20,7 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+
   avatarURL: {
     type: String,
   },
@@ -35,6 +36,8 @@ userSchema.pre('save', function (next) {
     this.avatarURL = avatarURL;
   }
   next();
+
+
 });
 
 userSchema.methods.setPassword = async function (password) {

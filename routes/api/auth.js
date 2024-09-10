@@ -5,6 +5,7 @@ const User = require("../../models/userSchema");
 const Joi = require("joi");
 require("dotenv").config();
 const authMiddleware = require("../../middlewares/authMiddleware");
+
 const upload = require("../../config/multer");
 const path = require("path");
 const fs = require("fs");
@@ -15,6 +16,7 @@ const avatarsDir = path.join(__dirname, "../../public/avatar");
 if (!fs.existsSync(avatarsDir)) {
   fs.mkdirSync(avatarsDir);
 }
+
 
 const joiSubscriptionSchema = Joi.object({
   subscription: Joi.string().valid('starter', 'pro', 'business').required(),
@@ -47,7 +49,10 @@ router.post("/users/signup", async (req, res) => {
       user: {
         email: newUser.email,
         subscription: newUser.subscription,
+
         avatarURL: newUser.avatarURL,
+
+
       },
     });
   } catch (error) {
@@ -76,13 +81,16 @@ router.post("/users/login", async (req, res) => {
 
     user.token = token;
     await user.save();
- 
+
     res.status(200).json({
       token,
       user: {
         email: user.email,
         subscription: user.subscription,
+
         avatarURL: user.avatarURL,
+
+
       },
     });
   } catch (error) {
@@ -91,6 +99,7 @@ router.post("/users/login", async (req, res) => {
   }
 });
 
+
 router.get("/users/logout", authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
@@ -98,16 +107,23 @@ router.get("/users/logout", authMiddleware, async (req, res) => {
     if (!user) {
       return res.status(401).json({ message: "Not authorized" });
     }
+
     
     user.token = null;
     await user.save();
-    
+
+
+    user.token = null;
+    await user.save();
+
+
     res.status(204).json({ message: "Logout successful" });
   } catch (error) {
     console.error("Error during logout:", error);
     res.status(500).json({ message: "Internal Server Error" });
   }
 });
+
 
 
 router.get("/users/current", authMiddleware, async (req, res) => {
@@ -122,6 +138,17 @@ router.get("/users/current", authMiddleware, async (req, res) => {
 
   } catch (e) {
     console.log(e);
+
+router.get("/users/current", authMiddleware, async (req, res) => {
+  try{
+    const user = req.user;
+    res.status(200).json({
+      email: user.email,
+      subscription: user.subscription,
+    });
+  } catch (e) {
+    consolelog(e);
+
     res.status(500).json({message: "Internal Server Error"})
   }
 });
@@ -147,13 +174,16 @@ router.patch("/", authMiddleware, async (req, res, next) => {
       user: {
         email: user.email,
         subscription: user.subscription,
+
         avatarURL: user.avatarURL,
+
       },
     });
   } catch (err) {
     next(err);
   }
 });
+
 
 router.patch( "/avatars",
   authMiddleware,
