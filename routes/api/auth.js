@@ -1,25 +1,20 @@
 const express = require("express");
 const router = express.Router();
-const jwt = require("jsonwebtoken");
 const User = require("../../models/userSchema");
 const Joi = require("joi");
-require("dotenv").config();
-const authMiddleware = require("../../middlewares/authMiddleware");
-
-const upload = require("../../config/multer");
 const path = require("path");
 const fs = require("fs");
 const jimp = require("jimp");
+const { v4: uuidv4 } = require("uuid");
+const transporter = require("../../config/nodeMailer");
 
-const avatarsDir = path.join(__dirname, "../../public/avatar");
+require("dotenv").config();
 
-if (!fs.existsSync(avatarsDir)) {
-  fs.mkdirSync(avatarsDir);
-}
-
+const authMiddleware = require("../../middlewares/authMiddleware");
+const upload = require("../../config/multer");
 
 const joiSubscriptionSchema = Joi.object({
-  subscription: Joi.string().valid('starter', 'pro', 'business').required(),
+  subscription: Joi.string().valid("starter", "pro", "business").required(),
 });
 
 router.post("/users/signup", async (req, res) => {
@@ -29,6 +24,7 @@ router.post("/users/signup", async (req, res) => {
     const existingUser = await User.findOne({ email });
 
     if (existingUser) {
+      console.log("User already exists");
       return res.status(409).json({
         status: "error",
         code: 409,
@@ -37,36 +33,133 @@ router.post("/users/signup", async (req, res) => {
       });
     }
 
+    const verificationToken = uuidv4();
+
     const newUser = new User({
       email,
-      password,
       subscription: "starter",
+      verificationToken,
     });
 
+    await newUser.setPassword(password);
     await newUser.save();
 
-    res.status(201).json({
-      user: {
-        email: newUser.email,
-        subscription: newUser.subscription,
+    const verifyUrl = `${process.env.BASE_URL}/verify/${verificationToken}`;
 
-        avatarURL: newUser.avatarURL,
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: "Account Registration Confirmation",
+      text: "Welcome! Please verify your email address",
+      html: `<p>Welcome!</p><p> Click <a href="${verifyUrl}">here</a> to verify your email address.</p>`,
+    };
 
+    try {
+      const mailResponse = await transporter.sendMail(mailOptions);
+      console.log("Email sent:", mailResponse);
 
-      },
-    });
+      return res.status(201).json({
+        message: "Signup successful, verification email sent",
+        user: {
+          email: newUser.email,
+          subscription: newUser.subscription,
+          avatarURL: newUser.avatarURL,
+          verify: newUser.verify,
+        },
+      });
+    } catch (emailError) {
+      console.error("Error sending email:", emailError);
+      return res.status(500).json({
+        message: "Internal Server Error: Unable to send verification email",
+      });
+    }
+  } catch (dbError) {
+    console.error("Registration error:", dbError);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+});
+
+router.get("/users/verify/:verificationToken", async (req, res) => {
+  const { verificationToken } = req.params;
+
+  try {
+    const user = await User.findOne({ verificationToken });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (user.verify) {
+      return res.status(400).json({ message: "User already verified" });
+    }
+
+    user.verify = true;
+    delete user.verificationToken;
+    await user.save();
+
+    res.status(200).json({ message: "Verification successful" });
   } catch (error) {
-    console.log(error);
+    console.error("Error during verification:", error);
     res.status(500).json({ message: "Internal Server Error" });
   }
 });
 
+router.post("/users/verify", async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ message: "Missing required field email" });
+  }
+
+  try {
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (user.verify) {
+      return res
+        .status(400)
+        .json({ message: "Verification has already been passed" });
+    }
+
+    const verificationToken = uuidv4();
+    user.verificationToken = verificationToken;
+    await user.save();
+
+    const verifyUrl = `${process.env.BASE_URL}/verify/${verificationToken}`;
+
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: "Email Verification",
+      text: `Welcome! Please confirm your email address to activate your account. ${verifyUrl}`,
+      html: `<p>Welcome!</p>
+             <p>It looks like you requested another verification email. Click <a href="${verifyUrl}">here</a> to verify your email address.</p>`,
+    };
+
+    try {
+      const mailResponse = await transporter.sendMail(mailOptions);
+      console.log(mailResponse);
+
+      res.status(200).json({ message: "Verification email sent" });
+    } catch (error) {
+      console.error("Error during sending verification email:", error);
+      res.status(500).json({ message: "Internal Server Error" });
+    }
+  } catch (error) {
+    console.error("Error during verification process:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+});
 
 router.post("/users/login", async (req, res) => {
   const { email, password } = req.body;
 
   try {
     const user = await User.findOne({ email });
+    console.log(user);
 
     if (!user || password !== user.password) {
       return res.status(401).json({
@@ -74,10 +167,13 @@ router.post("/users/login", async (req, res) => {
       });
     }
 
-    const payload = { id: user._id };
-    const token = jwt.sign(payload, process.env.JWT_SECRET, {
-      expiresIn: "1h",
-    });
+    if (!user.verify) {
+      return res.status(403).json({
+        message: "Email not verified",
+      });
+    }
+
+    const token = user.generateAuthToken();
 
     user.token = token;
     await user.save();
@@ -87,10 +183,7 @@ router.post("/users/login", async (req, res) => {
       user: {
         email: user.email,
         subscription: user.subscription,
-
         avatarURL: user.avatarURL,
-
-
       },
     });
   } catch (error) {
@@ -98,7 +191,6 @@ router.post("/users/login", async (req, res) => {
     res.status(500).json({ message: "Internal Server Error" });
   }
 });
-
 
 router.get("/users/logout", authMiddleware, async (req, res) => {
   try {
@@ -108,48 +200,13 @@ router.get("/users/logout", authMiddleware, async (req, res) => {
       return res.status(401).json({ message: "Not authorized" });
     }
 
-    
     user.token = null;
     await user.save();
-
-
-    user.token = null;
-    await user.save();
-
 
     res.status(204).json({ message: "Logout successful" });
   } catch (error) {
     console.error("Error during logout:", error);
     res.status(500).json({ message: "Internal Server Error" });
-  }
-});
-
-
-
-router.get("/users/current", authMiddleware, async (req, res) => {
-  try{
-    const user = req.user;
-    console.log(user)
-    res.status(200).json({
-      email: user.email,
-      subscription: user.subscription,
-      avatarURL: user.avatarURL,
-    });
-
-  } catch (e) {
-    console.log(e);
-
-router.get("/users/current", authMiddleware, async (req, res) => {
-  try{
-    const user = req.user;
-    res.status(200).json({
-      email: user.email,
-      subscription: user.subscription,
-    });
-  } catch (e) {
-    consolelog(e);
-
-    res.status(500).json({message: "Internal Server Error"})
   }
 });
 
@@ -162,7 +219,7 @@ router.patch("/", authMiddleware, async (req, res, next) => {
   const { subscription } = value;
 
   try {
-    const user = await User.findById(req.user._id); 
+    const user = await User.findById(req.user._id);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
@@ -174,9 +231,7 @@ router.patch("/", authMiddleware, async (req, res, next) => {
       user: {
         email: user.email,
         subscription: user.subscription,
-
         avatarURL: user.avatarURL,
-
       },
     });
   } catch (err) {
@@ -184,8 +239,8 @@ router.patch("/", authMiddleware, async (req, res, next) => {
   }
 });
 
-
-router.patch( "/avatars",
+router.patch(
+  "/avatars",
   authMiddleware,
   upload.single("avatar"),
   async (req, res) => {
@@ -205,7 +260,6 @@ router.patch( "/avatars",
 
       fs.rename(tempPath, targetPath, async (err) => {
         if (err) {
-          console.log(err);
           return res.status(500).json({ message: "Failed to save image" });
         }
 
@@ -223,10 +277,9 @@ router.patch( "/avatars",
         res.status(200).json({ avatarURL });
       });
     } catch (error) {
-      console.log(error)
       res.status(500).json({ message: "Internal Server Error" });
     }
-
-});
+  }
+);
 
 module.exports = router;
