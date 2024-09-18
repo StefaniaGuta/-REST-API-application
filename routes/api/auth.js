@@ -10,6 +10,8 @@ const upload = require("../../config/multer");
 const path = require("path");
 const fs = require("fs");
 const jimp = require("jimp");
+// const nodemailer = require("nodemailer");
+// const nodemailerConfig = require("../../config/nodeMailer");
 
 const avatarsDir = path.join(__dirname, "../../public/avatar");
 
@@ -23,7 +25,7 @@ const joiSubscriptionSchema = Joi.object({
 });
 
 router.post("/users/signup", async (req, res) => {
-  const { email, password } = req.body;
+  const { email,password } = req.body;
 
   try {
     const existingUser = await User.findOne({ email });
@@ -49,16 +51,14 @@ router.post("/users/signup", async (req, res) => {
       user: {
         email: newUser.email,
         subscription: newUser.subscription,
-
         avatarURL: newUser.avatarURL,
-
-
       },
     });
   } catch (error) {
     console.log(error);
     res.status(500).json({ message: "Internal Server Error" });
   }
+  
 });
 
 
@@ -124,31 +124,15 @@ router.get("/users/logout", authMiddleware, async (req, res) => {
   }
 });
 
-
-
 router.get("/users/current", authMiddleware, async (req, res) => {
   try{
     const user = req.user;
-    console.log(user)
     res.status(200).json({
       email: user.email,
       subscription: user.subscription,
-      avatarURL: user.avatarURL,
     });
-
   } catch (e) {
     console.log(e);
-
-router.get("/users/current", authMiddleware, async (req, res) => {
-  try{
-    const user = req.user;
-    res.status(200).json({
-      email: user.email,
-      subscription: user.subscription,
-    });
-  } catch (e) {
-    consolelog(e);
-
     res.status(500).json({message: "Internal Server Error"})
   }
 });
